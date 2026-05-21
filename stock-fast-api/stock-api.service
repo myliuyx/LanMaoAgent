@@ -1,0 +1,25 @@
+[Unit]
+Description=Stock API FastAPI Service
+After=network.target
+
+[Service]
+Type=simple
+User=huajuan
+WorkingDirectory=/home/huajuan/Github_Code/stock-fast-api
+ExecStart=/home/huajuan/Github_Code/stock-fast-api/venv/bin/python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+Environment=DB_HOST=192.168.3.16
+Environment=DB_PORT=5432
+Environment=DB_NAME=stock_cache_system
+Environment=DB_USER=postgres
+Environment=DB_PASSWORD=H7k9P2mX5wR1
+Environment=JWT_SECRET_KEY=stock-api-secret-key-change-in-production
+
+# 日志
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=stock-api
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,18 @@
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+pyjwt>=2.8.0
+sqlalchemy
+psycopg2-binary
+python-dotenv
+apscheduler
+baostock
+efinance
+requests
+tenacity
+
+# 测试
+pytest
+httpx
+bcrypt==5.0.0
