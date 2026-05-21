@@ -1,0 +1,24 @@
+{
+  "llm": {
+    "provider": "openai",
+    "apiKey": "__YOUR_API_KEY_HERE__",
+    "baseUrl": "http://192.168.3.21:8080",
+    "timeoutSec": 120,
+    "stream": true
+  },
+  "defaultTools": ["filesystem", "git", "terminal"],
+  "agentsDir": "/home/shaomai/.agent-platform/agents",
+  "runtime": {
+    "maxIterations": 20,
+    "stmThreshold": 50,
+    "compressionRatio": 0.85,
+    "contextWindow": 260000
+  },
+  "security": {
+    "allowedPaths": [],
+    "terminalWhitelist": []
+  },
+  "cli": {
+    "prompt": "Ask me anything: "
+  }
+}

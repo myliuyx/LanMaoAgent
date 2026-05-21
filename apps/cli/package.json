@@ -1,0 +1,17 @@
+{
+  "name": "@agent-platform/cli",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "agent-platform": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@agent-platform/platform": "workspace:*",
+    "picocolors": "^1.1.1",
+    "marked": "^15.0.0",
+    "ora": "^8.1.0"
+  }
+}

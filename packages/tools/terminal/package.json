@@ -1,0 +1,12 @@
+{
+  "name": "@agent-platform/tools-terminal",
+  "private": true,
+  "type": "module",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@agent-platform/shared-types": "workspace:*"
+  }
+}

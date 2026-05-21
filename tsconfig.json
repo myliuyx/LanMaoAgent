@@ -1,0 +1,14 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/shared-types" },
+    { "path": "packages/memory-stm" },
+    { "path": "packages/llm-adapter" },
+    { "path": "packages/tool-core" },
+    { "path": "packages/tools/filesystem" },
+    { "path": "packages/tools/git" },
+    { "path": "packages/tools/terminal" },
+    { "path": "packages/platform" },
+    { "path": "apps/cli" }
+  ]
+}

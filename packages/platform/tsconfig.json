@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "include": ["src"],
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "references": [
+    { "path": "../shared-types" },
+    { "path": "../llm-adapter" },
+    { "path": "../tool-core" },
+    { "path": "../memory-stm" },
+    { "path": "../tools/filesystem" },
+    { "path": "../tools/git" },
+    { "path": "../tools/terminal" }
+  ]
+}

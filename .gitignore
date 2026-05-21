@@ -1,0 +1,9 @@
+node_modules/
+dist/
+src/*.js
+src/*.d.ts
+src/*.map
+*.tgz
+.env*
+*.log
+.DS_Store

@@ -1,0 +1,14 @@
+{
+  "name": "@agent-platform/tool-core",
+  "private": true,
+  "type": "module",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@agent-platform/shared-types": "workspace:*",
+    "@agent-platform/llm-adapter": "workspace:*",
+    "@agent-platform/memory-stm": "workspace:*"
+  }
+}
