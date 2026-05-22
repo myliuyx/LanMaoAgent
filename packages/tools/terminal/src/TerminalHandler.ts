@@ -105,7 +105,7 @@ export class TerminalHandler implements ToolHandler {
   private logger: Logger
 
   constructor(whitelist?: string[], logger?: Logger) {
-    this.whitelist = whitelist ? new Set(whitelist) : DEFAULT_WHITELIST
+    this.whitelist = (whitelist && whitelist.length > 0) ? new Set(whitelist) : DEFAULT_WHITELIST
     this.logger = logger ?? consoleLogger
   }
 
