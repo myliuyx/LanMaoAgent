@@ -1,5 +1,7 @@
 import pc from 'picocolors'
 import type { ToolCall } from '@agent-platform/platform'
+import type { ToolResult } from '@agent-platform/shared-types'
+import { OutputManager } from './output-manager.js'
 
 const AGENT_LABELS: Record<string, string> = {
   orchestrator: '编排',
@@ -15,27 +17,23 @@ function agentTag(agentId: string): string {
 }
 
 export class ToolView {
-  constructor(private write: (line: string) => void = (s) => process.stdout.write(s + '\n')) {}
+  constructor(private om: OutputManager) {}
 
   onStart(call: ToolCall, agentId: string): void {
     const args = JSON.stringify(call.arguments)
-    this.write(`${agentTag(agentId)} ⎿  ${pc.dim(call.name + '(' + args + ')')}`)
+    this.om.updateToolLine(`${agentTag(agentId)} ⎿  ${pc.dim(call.name + '(' + args + ')')}`)
   }
 
-  onFinish(
-    call: ToolCall,
-    result: { content: string; isError: boolean },
-    agentId: string,
-  ): void {
+  onFinish(call: ToolCall, result: ToolResult, agentId: string): void {
     if (result.isError) {
-      this.write(`${agentTag(agentId)} ⎿  ${pc.red(call.name + ' error: ' + result.content)}`)
+      this.om.updateToolLine(`${agentTag(agentId)} ⎿  ${pc.red(call.name + ' error: ' + result.content)}`)
     } else {
       const summary = result.content.length + ' chars'
-      this.write(`${agentTag(agentId)} ⎿  ${pc.green('✓ ' + call.name)} ${pc.dim('(' + summary + ')')}`)
+      this.om.updateToolLine(`${agentTag(agentId)} ⎿  ${pc.green('✓ ' + call.name)} ${pc.dim('(' + summary + ')')}`)
     }
   }
 
   onRetry(call: ToolCall, attempt: number, maxAttempts: number, agentId: string): void {
-    this.write(`${agentTag(agentId)} ⎿  ${pc.yellow('↻ ' + call.name + ` (retry ${attempt}/${maxAttempts})`)}`)
+    this.om.updateToolLine(`${agentTag(agentId)} ⎿  ${pc.yellow('↻ ' + call.name + ` (retry ${attempt}/${maxAttempts})`)}`)
   }
 }
