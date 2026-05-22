@@ -1,9 +1,29 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
-src/*.js
-src/*.d.ts
-src/*.map
+coverage/
 *.tgz
+
+# TypeScript build artifacts (recursive)
+**/*.tsbuildinfo
+**/*.js.map
+**/*.d.ts
+
+# Compiled JS in src/ directories (TS projects compile to same dir)
+src/**/*.js
+!eslint.config.js
+
+# Environment & secrets
 .env*
 *.log
+
+# OS / Editor
 .DS_Store
+.idea/
+.vscode/
+
+# Vite temp files
+node_modules/.vite/
+node_modules/.vite-temp/
