@@ -122,13 +122,10 @@ export class FilesystemHandler implements ToolHandler {
     isWriteOperation = false,
   ): ToolResult | null {
     const checkAllowed = (targetPath: string): boolean => {
-      try {
-        const realTarget = safeResolve(targetPath)
-        const pathsToCheck = allowedPaths || this.allowedPaths
-        return isInAllowedPath(realTarget, pathsToCheck)
-      } catch {
-        return false
-      }
+      const realTarget = safeResolve(targetPath)
+      if (realTarget === null) return false
+      const pathsToCheck = allowedPaths || this.allowedPaths
+      return isInAllowedPath(realTarget, pathsToCheck)
     }
 
     try {

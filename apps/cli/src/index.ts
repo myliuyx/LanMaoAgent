@@ -66,7 +66,9 @@ function loadAgents(
       return builtin
     }
 
-    visited.add(id)
+    // Build nextVisited for recursive extends resolution
+    const nextVisited = new Set(visited)
+    nextVisited.add(id)
 
     const rawTools = (fileCfg.tools as string[]) ?? []
     const rawExtends = (fileCfg.extends as string) ?? ''
@@ -74,7 +76,7 @@ function loadAgents(
 
     let mergedTools: string[]
     if (rawExtends) {
-      const parent = resolveOne(rawExtends, visited)
+      const parent = resolveOne(rawExtends, nextVisited)
       mergedTools = [
         ...new Set([
           ...(parent.tools ?? defaultTools),

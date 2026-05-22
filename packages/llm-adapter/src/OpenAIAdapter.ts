@@ -141,6 +141,16 @@ export class OpenAIAdapter implements LLMAdapter {
     }
   }
 
+  private _buildHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      'content-type': 'application/json',
+    }
+    if (this.apiKey) {
+      headers['authorization'] = `Bearer ${this.apiKey}`
+    }
+    return headers
+  }
+
   private buildRequest(messages: ChatMessage[], tools?: ToolDefinition[]) {
     const oaiMessages = messages.map((m) => {
       if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
@@ -190,13 +200,6 @@ export class OpenAIAdapter implements LLMAdapter {
       }))
     }
 
-    const headers: Record<string, string> = {
-      'content-type': 'application/json',
-    }
-    if (this.apiKey) {
-      headers['authorization'] = `Bearer ${this.apiKey}`
-    }
-
     return body
   }
 
@@ -206,11 +209,7 @@ export class OpenAIAdapter implements LLMAdapter {
     onChunk?: (text: string) => void,
   ): Promise<ChatResponse> {
     const body = this.buildRequest(messages, tools)
-
-    const headers: Record<string, string> = {}
-    if (this.apiKey) {
-      headers['authorization'] = `Bearer ${this.apiKey}`
-    }
+    const headers = this._buildHeaders()
 
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), this.timeoutSec * 1000)
@@ -218,7 +217,7 @@ export class OpenAIAdapter implements LLMAdapter {
     try {
       const response = await this.fetchFn(`${this.baseUrl}/chat/completions`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', ...headers },
+        headers,
         body: JSON.stringify(body),
         signal: controller.signal,
       })

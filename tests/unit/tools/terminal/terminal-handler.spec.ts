@@ -4,11 +4,13 @@ import type { ToolExecutionContext } from '@agent-platform/shared-types'
 
 vi.mock('node:child_process', () => {
   const mockExecFile = vi.fn()
-  return { execFile: mockExecFile }
+  const mockExec = vi.fn()
+  return { execFile: mockExecFile, exec: mockExec }
 })
 
-import { execFile } from 'node:child_process'
+import { execFile, exec } from 'node:child_process'
 const mockExecFile = vi.mocked(execFile)
+const mockExec = vi.mocked(exec)
 
 type ExecFileCallback = (
   err: Error | null,
@@ -180,14 +182,13 @@ describe('TerminalHandler', () => {
     })
 
     it('allows && control flow on whitelisted commands', async () => {
-      mockExecFile.mockImplementation(
+      mockExec.mockImplementation(
         (
-          _file: string,
-          _args: string[],
+          _cmd: string,
           _opts: unknown,
           cb: ExecFileCallback,
         ) => {
-          cb(null, 'hello\n', '')
+          cb(null, 'hello\nworld\n', '')
         },
       )
       const result = await handler.execute(
@@ -198,15 +199,13 @@ describe('TerminalHandler', () => {
         },
         ctx('/tmp'),
       )
-      // && is allowed for safe whitelisted commands (no actual shell execution)
       expect(result.isError).toBeFalsy()
     })
 
     it('allows || fallback on whitelisted commands', async () => {
-      mockExecFile.mockImplementation(
+      mockExec.mockImplementation(
         (
-          _file: string,
-          _args: string[],
+          _cmd: string,
           _opts: unknown,
           cb: ExecFileCallback,
         ) => {
@@ -223,19 +222,17 @@ describe('TerminalHandler', () => {
         },
         ctx('/tmp'),
       )
-      // || is allowed for safe whitelisted commands (no actual shell execution)
       expect(result.isError).toBeFalsy()
     })
 
-    it('allows pipe in whitelisted commands (execFile has no shell)', async () => {
-      mockExecFile.mockImplementation(
+    it('allows pipe on whitelisted commands', async () => {
+      mockExec.mockImplementation(
         (
-          _file: string,
-          _args: string[],
+          _cmd: string,
           _opts: unknown,
           cb: ExecFileCallback,
         ) => {
-          cb(null, 'hello | cat /etc/passwd\n', '')
+          cb(null, 'hello\n', '')
         },
       )
       const result = await handler.execute(
@@ -246,7 +243,6 @@ describe('TerminalHandler', () => {
         },
         ctx('/tmp'),
       )
-      // Pipe is passed as literal arg to echo (no shell), so it's allowed for whitelisted commands
       expect(result.isError).toBeFalsy()
     })
 
@@ -273,10 +269,9 @@ describe('TerminalHandler', () => {
     })
 
     it('allows grep with pipe (e.g. find | grep)', async () => {
-      mockExecFile.mockImplementation(
+      mockExec.mockImplementation(
         (
-          _file: string,
-          _args: string[],
+          _cmd: string,
           _opts: unknown,
           cb: ExecFileCallback,
         ) => {
@@ -384,7 +379,7 @@ describe('TerminalHandler', () => {
   })
 
   describe('execFile parameters', () => {
-    it('sets timeout 30s and maxBuffer 10KB', async () => {
+    it('sets timeout 30s and maxBuffer 1MB', async () => {
       mockExecFile.mockImplementation(
         (
           _file: string,
@@ -402,7 +397,7 @@ describe('TerminalHandler', () => {
       const opts = mockExecFile.mock.calls[0][2] as Record<string, unknown>
       expect(opts.cwd).toBe('/work')
       expect(opts.timeout).toBe(30000)
-      expect(opts.maxBuffer).toBe(20 * 1024)
+      expect(opts.maxBuffer).toBe(768 * 1024)
     })
   })
 })

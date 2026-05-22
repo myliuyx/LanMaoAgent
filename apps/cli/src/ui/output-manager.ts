@@ -32,12 +32,7 @@ export class OutputManager {
   }
 
   writeContent(text: string): void {
-    const width = this.terminalWidth
-    const centered = text
-      .split('\n')
-      .map((line) => (line.trim() ? centerLine(line, width) : line))
-      .join('\n')
-    this.stdout.write(centered + '\n')
+    this.writeLine(text)
   }
 
   updateToolLine(text: string): void {

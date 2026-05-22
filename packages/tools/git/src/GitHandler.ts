@@ -1,12 +1,14 @@
 import { execFile } from 'node:child_process'
 import { isAbsolute } from 'node:path'
 import type {
+  Logger,
   ToolHandler,
   ToolDefinition,
   ToolCall,
   ToolResult,
   ToolExecutionContext,
 } from '@agent-platform/shared-types'
+import { consoleLogger } from '@agent-platform/shared-types'
 
 /** Safely extract error message from unknown exception value */
 function safeErrorMessage(e: unknown): string {
@@ -17,6 +19,20 @@ function safeErrorMessage(e: unknown): string {
     return String(obj.message ?? JSON.stringify(e))
   }
   return `Unknown error: ${JSON.stringify(e)}`
+}
+
+/**
+ * Determine if a git command error is recoverable (retryable).
+ * Network-related errors are retryable; permission/missing-file errors are not.
+ */
+function isGitRetryable(e: unknown): boolean {
+  const msg = safeErrorMessage(e).toLowerCase()
+  // Non-recoverable: file/directory doesn't exist, no permissions, not a git repo
+  if (/\b(enoent|eacces|eperm|not a git repository)\b/.test(msg)) return false
+  // Recoverable: network timeouts, connection resets, server errors
+  if (/\b(etimedout|econnreset|econnrefused|eai-again|network|timeout|502|503|429)\b/.test(msg)) return true
+  // Default to non-retryable for unknown errors
+  return false
 }
 
 function execGit(
@@ -43,6 +59,11 @@ function execGit(
 
 export class GitHandler implements ToolHandler {
   readonly id = 'git'
+  private logger: Logger
+
+  constructor(logger?: Logger) {
+    this.logger = logger ?? consoleLogger
+  }
 
   getTools(): ToolDefinition[] {
     return [
@@ -100,7 +121,13 @@ export class GitHandler implements ToolHandler {
           return { content: `Unknown tool: ${call.name}`, isError: true, retryable: false }
       }
     } catch (e) {
-      return { content: safeErrorMessage(e), isError: true }
+      const msg = safeErrorMessage(e)
+      this.logger?.error('Git command failed', { tool: call.name, error: msg })
+      return { 
+        content: msg, 
+        isError: true,
+        retryable: isGitRetryable(e)
+      }
     }
   }
 }

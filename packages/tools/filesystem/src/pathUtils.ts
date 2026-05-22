@@ -17,7 +17,7 @@ export const EXEC_MAX_BUFFER = 20 * 1024
  * relative portion. This prevents symlink-based TOCTOU attacks where an
  * attacker replaces a parent directory with a symlink between checks.
  */
-export function safeResolve(targetPath: string): string {
+export function safeResolve(targetPath: string): string | null {
   const resolved = resolve(targetPath)
 
   try {
@@ -42,8 +42,9 @@ export function safeResolve(targetPath: string): string {
     const realParent = realpathSync(current)
     const relativePath = resolved.slice(current.length)
     return join(realParent, relativePath)
-  } catch {
-    return resolved
+  } catch (e) {
+    console.warn(`[safeResolve] Failed to resolve path "${targetPath}": ${e instanceof Error ? e.message : 'unknown error'}`)
+    return null
   }
 }
 
@@ -57,9 +58,11 @@ export function safeResolve(targetPath: string): string {
 export function isInAllowedPath(realTarget: string, allowedPaths: string[]): boolean {
   // Normalize trailing slashes so "/workspace" and "/workspace/" are treated identically
   const normalizedTarget = realTarget.replace(/\/+$/, '')
-  const resolvedAllowed = allowedPaths.map(p => safeResolve(resolve(p)).replace(/\/+$/, ''))
-  for (const allowed of resolvedAllowed) {
-    if (normalizedTarget === allowed || normalizedTarget.startsWith(allowed + '/')) {
+  for (const p of allowedPaths) {
+    const resolvedAllowed = safeResolve(resolve(p))
+    if (resolvedAllowed === null) continue // skip paths that can't be resolved
+    const normalizedAllowed = resolvedAllowed.replace(/\/+$/, '')
+    if (normalizedTarget === normalizedAllowed || normalizedTarget.startsWith(normalizedAllowed + '/')) {
       return true
     }
   }
@@ -70,6 +73,8 @@ export function isInAllowedPath(realTarget: string, allowedPaths: string[]): boo
  * Check that the resolved parent directory is within allowed paths.
  */
 export function validateAncestors(targetPath: string, allowedPaths: string[]): boolean {
-  const current = dirname(safeResolve(resolve(targetPath)))
+  const resolved = safeResolve(resolve(targetPath))
+  if (resolved === null) return false
+  const current = dirname(resolved)
   return isInAllowedPath(current, allowedPaths)
 }

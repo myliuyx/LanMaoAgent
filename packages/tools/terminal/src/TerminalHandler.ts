@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process'
+import { execFile, exec } from 'node:child_process'
 import type {
   Logger,
   ToolHandler,
@@ -9,6 +9,14 @@ import type {
 } from '@agent-platform/shared-types'
 import { consoleLogger } from '@agent-platform/shared-types'
 import { checkShellInjection } from './shellSecurity.js'
+
+/**
+ * Maximum buffer size for terminal command output.
+ * Set to 768KB as a compromise: large enough for real-world use cases (e.g.,
+ * `git diff`, `ls -laR` on medium projects) while mitigating DoS risk from
+ * unbounded memory allocation via malicious command output.
+ */
+const TERMINAL_MAX_BUFFER = 768 * 1024 // 768KB — balances functionality vs. security
 
 /**
  * Check command arguments for dangerous patterns that could lead to
@@ -99,6 +107,11 @@ function parseCommand(cmd: string): { name: string; args: string[] } {
   return { name: parts[0] ?? '', args: parts.slice(1) }
 }
 
+/** Check if command uses shell operators that require shell execution. */
+function needsShell(command: string): boolean {
+  return /&&|\|\||\|/.test(command)
+}
+
 export class TerminalHandler implements ToolHandler {
   readonly id = 'terminal'
   private whitelist: Set<string>
@@ -145,6 +158,64 @@ export class TerminalHandler implements ToolHandler {
       }
     }
 
+    // Shell mode: commands with &&, ||, | need shell execution
+    if (needsShell(command)) {
+      const firstCmd = command.trim().split(/\s+/)[0]
+      if (!this.whitelist.has(firstCmd)) {
+        return { content: `Command '${firstCmd}' is not allowed`, isError: true, retryable: false }
+      }
+
+      // Check each pipeline segment for always-dangerous patterns
+      const segments = command.split(/\s*(?:&&|\|\||\|)\s*/)
+      for (const segment of segments) {
+        const danger = checkShellInjection(segment.trim())
+        if (danger?.reason.startsWith('Blocked')) {
+          return { content: danger.reason, isError: true, retryable: false }
+        }
+      }
+
+      try {
+        const output = await new Promise<string>((resolve, reject) => {
+          exec(
+            command,
+            {
+              cwd: ctx.cwd,
+              timeout: 30000,
+              maxBuffer: TERMINAL_MAX_BUFFER,
+            },
+            (err, stdout, stderr) => {
+              if (err) {
+                const msg = stderr ? `${stdout}\n${stderr}`.trim() : err.message || 'Unknown error'
+                reject(new Error(msg))
+              } else {
+                resolve(stderr ? `${stdout}\n[stderr]\n${stderr}`.trim() : stdout)
+              }
+            },
+          )
+        })
+
+        if (output.length > 10 * 1024) {
+          return { content: output.slice(0, 10 * 1024) + '\n[output truncated]', isError: false }
+        }
+        return { content: output, isError: false }
+      } catch (e) {
+        let errorMessage: string
+        if (e instanceof Error) {
+          errorMessage = e.message || e.toString()
+        } else if (typeof e === 'string') {
+          errorMessage = e
+        } else if (e != null && typeof e === 'object' && 'message' in e) {
+          const obj = e as Record<string, unknown>
+          errorMessage = String(obj.message ?? JSON.stringify(e))
+        } else {
+          errorMessage = `Unknown error: ${JSON.stringify(e)}`
+        }
+
+        this.logger.error('Command execution failed', { command, error: errorMessage })
+        return { content: errorMessage, isError: true }
+      }
+    }
+
     const { name, args: cmdArgs } = parseCommand(command)
 
     // Check if the full command pattern is explicitly allowed
@@ -181,7 +252,7 @@ export class TerminalHandler implements ToolHandler {
           {
             cwd: ctx.cwd,
             timeout: 30000,
-            maxBuffer: 20 * 1024,
+            maxBuffer: TERMINAL_MAX_BUFFER,
           },
           (err, stdout, stderr) => {
             if (err) {
