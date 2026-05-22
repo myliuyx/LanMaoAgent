@@ -7,7 +7,7 @@
  * - 此正则只拦截真正危险的注入：; ` $() ${} — 这些即使在 execFile 的 argv 中
  *   也可能通过某些命令的内部处理（如 sh -c、eval）被利用
  */
-const DANGEROUS_METACHARACTERS = /[;`]|\$\(|\${.*}/
+const DANGEROUS_METACHARACTERS = /[;`]|\$\(|\$\{[^}]*\}/
 
 /** Dangerous patterns that should always be blocked (e.g. rm -rf). */
 const ALWAYS_DANGEROUS_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [

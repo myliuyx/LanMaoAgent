@@ -251,10 +251,10 @@ describe('runAgentLoop', () => {
         maxIterations: 10,
       })
 
-      // After 3 compact attempts all return 0, should break
-      expect(result.status).toBe('failed')
+      // compact() returns 0 when messages.length <= threshold (nothing to compact).
+      // This is NOT a failure — loop continues until max iterations.
+      expect(result.status).toBe('max_iterations_reached')
       expect(compactSpy).toHaveBeenCalled()
-      expect(compactSpy.mock.results.filter(r => r.value === 0)).toHaveLength(3)
     })
 
     it('compact syncs back to local messages array', async () => {

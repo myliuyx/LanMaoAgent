@@ -68,8 +68,6 @@ export async function runAgentLoop(
   const maxIterations = config.maxIterations ?? 20
   let messages = [...config.messages]
   let cumulativeTokens = 0
-  let consecutiveCompactFailures = 0
-  const maxConsecutiveCompactFailures = 3
 
   // Check delegation depth limit
   if ((config.depth ?? 0) >= (config.maxDepth ?? 5)) {
@@ -185,20 +183,8 @@ export async function runAgentLoop(
 
       if (needsCompact) {
         const freed = config.memory.compact()
-        if (freed <= 0) {
-          consecutiveCompactFailures++
-          if (consecutiveCompactFailures >= maxConsecutiveCompactFailures) {
-            return {
-              status: 'failed',
-              agentId: config.agent.id,
-              error: 'Token budget exceeded hard limit',
-              messages,
-              memory: config.memory,
-            }
-          }
-        } else {
-          consecutiveCompactFailures = 0
 
+        if (freed > 0) {
           // Rebuild STM from the unified array so future adds stay in sync.
           const stmContext = config.memory.getContext()
           const keepCount = (toolCalls?.length ?? 0) + 1
@@ -213,9 +199,6 @@ export async function runAgentLoop(
             config.memory.add(m)
           }
         }
-      } else {
-        // Under budget — reset failure counter.
-        consecutiveCompactFailures = 0
       }
     }
   }
