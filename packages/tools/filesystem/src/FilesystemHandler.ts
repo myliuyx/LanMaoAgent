@@ -1,26 +1,27 @@
 import {
+  lstat,
   readFile,
   readdir,
-  stat,
   writeFile,
 } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { dirname, join, relative, resolve } from 'node:path'
+import { join, relative, resolve } from 'node:path'
 import {
   safeResolve,
   isInAllowedPath,
   validateAncestors,
   MAX_STRING_ARG_LENGTH,
   GREP_MAX_RESULTS,
-  OUTPUT_TRUNCATE_THRESHOLD,
 } from './pathUtils.js'
 import type {
+  Logger,
   ToolHandler,
   ToolDefinition,
   ToolCall,
   ToolResult,
   ToolExecutionContext,
 } from '@agent-platform/shared-types'
+import { consoleLogger } from '@agent-platform/shared-types'
 
 function validateStringArg(
   value: unknown,
@@ -80,7 +81,8 @@ const SCHEMA_WRITE: Record<string, unknown> = {
   type: 'object',
   properties: {
     path: { type: 'string', description: 'File path to write' },
-    content: { type: 'string', description: 'Content to write' },
+    content: { type: 'string', description: 'Content to write. For large files exceeding ~64KB, split into multiple calls using append mode.' },
+    append: { type: 'boolean', description: 'If true, append content instead of overwriting the file. Use this for writing large files in chunks.' },
   },
   required: ['path', 'content'],
 }
@@ -102,9 +104,11 @@ const SCHEMA_EDIT: Record<string, unknown> = {
 export class FilesystemHandler implements ToolHandler {
   readonly id = 'filesystem'
   private allowedPaths: string[]
+  private logger: Logger
 
-  constructor(allowedPaths?: string[]) {
+  constructor(allowedPaths?: string[], logger?: Logger) {
     this.allowedPaths = allowedPaths && allowedPaths.length > 0 ? allowedPaths : [process.cwd()]
+    this.logger = logger ?? consoleLogger
   }
 
   /**
@@ -234,9 +238,10 @@ export class FilesystemHandler implements ToolHandler {
           if (contentErr) return { content: contentErr, isError: true, retryable: false }
           const pathVal = args['path'] as string
           const contentVal = args['content'] as string
+          const append = typeof args['append'] === 'boolean' ? (args['append'] as boolean) : undefined
           const pathCheck = this.validatePath(pathVal, undefined, true)
           if (pathCheck) return pathCheck
-          return this.writeFile(pathVal, contentVal)
+          return this.writeFile(pathVal, contentVal, append)
         }
         case 'edit_file': {
           const pathErr = validateStringArg(args['path'], 'path')
@@ -256,9 +261,8 @@ export class FilesystemHandler implements ToolHandler {
         default:
           return { content: `Unknown tool: ${call.name}`, isError: true, retryable: false }
       }
-    } catch (e) {
-      // eslint-disable-next-line no-console
-      console.error(`[FilesystemHandler] Internal error in ${call.name}:`, e)
+    } catch {
+      this.logger.error('Internal error in tool execution', { tool: call.name })
       return { content: 'Internal error occurred', isError: true, retryable: false }
     }
   }
@@ -366,8 +370,11 @@ export class FilesystemHandler implements ToolHandler {
         const fullPath = join(dir, entry)
         let entryStat: import('node:fs').Stats
         try {
-          entryStat = await stat(fullPath)
+          entryStat = await lstat(fullPath)
         } catch {
+          continue
+        }
+        if (entryStat.isSymbolicLink()) {
           continue
         }
         if (entryStat.isDirectory()) {
@@ -417,9 +424,14 @@ export class FilesystemHandler implements ToolHandler {
     return { content: finalContent, isError: false, metadata }
   }
 
-  private async writeFile(path: string, content: string): Promise<ToolResult> {
-    await writeFile(path, content, 'utf-8')
-    return { content: 'File written successfully', isError: false }
+  private async writeFile(
+    path: string,
+    content: string,
+    append?: boolean,
+  ): Promise<ToolResult> {
+    const flag = append ? 'a' : 'w'
+    await writeFile(path, content, { encoding: 'utf-8', flag })
+    return { content: `File ${append ? 'appended to' : 'written'} successfully`, isError: false }
   }
 
   private async editFile(

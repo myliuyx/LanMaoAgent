@@ -1,11 +1,13 @@
 import type {
   ChatMessage,
   ChatResponse,
+  Logger,
   TokenUsage,
   ToolDefinition,
   ToolCall,
   LlmConfig,
 } from '@agent-platform/shared-types'
+import { consoleLogger } from '@agent-platform/shared-types'
 import type { LLMAdapter } from './ClaudeAdapter.js'
 
 function isAbortError(e: unknown): boolean {
@@ -23,6 +25,56 @@ const FINISH_REASON_MAP: Record<string, 'stop' | 'tool_calls' | 'length' | 'cont
   content_filter: 'content_filter',
 }
 
+/**
+ * Check if a string appears to be a balanced JSON object (braces matched, respecting strings).
+ * This is used to detect when accumulated SSE chunks form a complete JSON payload.
+ */
+function isBalancedJson(str: string): boolean {
+  let depth = 0
+  let inString = false
+  let escapeNext = false
+
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i]
+
+    if (escapeNext) {
+      escapeNext = false
+      continue
+    }
+
+    if (ch === '\\') {
+      if (inString) escapeNext = true
+      continue
+    }
+
+    if (ch === '"') {
+      inString = !inString
+      continue
+    }
+
+    if (!inString) {
+      if (ch === '{' || ch === '[') depth++
+      else if (ch === '}' || ch === ']') {
+        depth--
+        if (depth < 0) return false
+      }
+    }
+  }
+
+  return depth === 0 && !inString
+}
+
+/**
+ * Safely parse a JSON string, returning the parsed value or undefined on failure.
+ */
+function safeJsonParse(str: string): unknown | undefined {
+  try {
+    return JSON.parse(str)
+  } catch {
+    return undefined
+  }
+}
+
 export class OpenAIAdapter implements LLMAdapter {
   private apiKey?: string
   private baseUrl: string
@@ -32,10 +84,11 @@ export class OpenAIAdapter implements LLMAdapter {
   private model: string
   private maxTokens: number
   private temperature: number
+  private logger: Logger
 
   constructor(
     config: LlmConfig,
-    options: { fetchFn?: typeof fetch; model?: string; maxTokens?: number; temperature?: number } = {},
+    options: { fetchFn?: typeof fetch; model?: string; maxTokens?: number; temperature?: number; logger?: Logger } = {},
   ) {
     this.apiKey = config.apiKey
     const raw = (config.baseUrl ?? 'https://api.openai.com/v1').replace(/\/+$/, '')
@@ -46,6 +99,7 @@ export class OpenAIAdapter implements LLMAdapter {
     this.model = options.model ?? 'gpt-4o'
     this.maxTokens = options.maxTokens ?? 8192
     this.temperature = options.temperature ?? 0.2
+    this.logger = options.logger ?? consoleLogger
   }
 
   async complete(
@@ -74,6 +128,7 @@ export class OpenAIAdapter implements LLMAdapter {
 
       if (isRetryable && attempt < maxRetries) {
         const delay = Math.min(1000 * 2 ** attempt, 5000)
+        this.logger.warn('API error, will retry', { status: e instanceof Error ? e.message : 'unknown', attempt })
         await sleep(delay)
         return this.completeWithRetry(messages, tools, onChunk, attempt + 1)
       }
@@ -211,6 +266,9 @@ export class OpenAIAdapter implements LLMAdapter {
       let finishReason = ''
       let usage: Record<string, number> | undefined
 
+      // Track accumulated argument strings per tool call index for incremental parsing
+      const argBuffers = new Map<number, string>()
+
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
@@ -257,9 +315,22 @@ export class OpenAIAdapter implements LLMAdapter {
                       name: (tc.function?.name as string) || '',
                       arguments: '',
                     }
+                    argBuffers.set(idx, '')
                   }
+
                   if (tc.function?.arguments) {
+                    const buf = argBuffers.get(idx) ?? ''
+                    const newBuf = buf + tc.function.arguments
+                    argBuffers.set(idx, newBuf)
                     ;(toolCallsAccum[idx].arguments as string) += tc.function.arguments as string
+
+                    // Try incremental parse when braces appear balanced
+                    if (isBalancedJson(newBuf)) {
+                      const parsedArgs = safeJsonParse(newBuf)
+                      if (parsedArgs !== undefined && typeof parsedArgs === 'object') {
+                        toolCallsAccum[idx].arguments = parsedArgs as Record<string, unknown>
+                      }
+                    }
                   }
                 }
               }
@@ -273,14 +344,26 @@ export class OpenAIAdapter implements LLMAdapter {
       const parsedToolCalls = toolCallsAccum.length > 0
         ? toolCallsAccum.map((tc) => {
             let args: unknown = tc.arguments
+
             if (typeof tc.arguments === 'string' && tc.arguments) {
-              try {
-                args = JSON.parse(tc.arguments as string)
-              } catch {
-                // SSE may split a JSON token across chunks; fall back to empty object.
+              // Final parse attempt with balanced-brace check for safety
+              const parsedArgs = safeJsonParse(tc.arguments as string)
+              if (parsedArgs !== undefined && typeof parsedArgs === 'object') {
+                args = parsedArgs
+              } else if (isBalancedJson(tc.arguments as string)) {
+                // Braces are balanced but parse failed — likely trailing comma or other issue; still try once more
+                const fallback = safeJsonParse(tc.arguments as string)
+                if (fallback !== undefined && typeof fallback === 'object') {
+                  args = fallback
+                } else {
+                  args = {}
+                }
+              } else {
+                // Braces not balanced — partial JSON from SSE split; fall back to empty object.
                 args = {}
               }
             }
+
             return { ...tc, arguments: args }
           })
         : undefined

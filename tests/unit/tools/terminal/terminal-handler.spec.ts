@@ -76,6 +76,42 @@ describe('TerminalHandler', () => {
       )
       expect(result.isError).toBeFalsy()
     })
+
+    it("allowed command 'pwd' executes successfully", async () => {
+      mockExecFile.mockImplementation(
+        (
+          _file: string,
+          _args: string[],
+          _opts: unknown,
+          cb: ExecFileCallback,
+        ) => {
+          cb(null, '/current/dir\n', '')
+        },
+      )
+      const result = await handler.execute(
+        { id: '1', name: 'exec_command', arguments: { command: 'pwd' } },
+        ctx('/tmp'),
+      )
+      expect(result.isError).toBeFalsy()
+    })
+
+    it("allowed command 'git status' executes successfully", async () => {
+      mockExecFile.mockImplementation(
+        (
+          _file: string,
+          _args: string[],
+          _opts: unknown,
+          cb: ExecFileCallback,
+        ) => {
+          cb(null, 'On branch main\n', '')
+        },
+      )
+      const result = await handler.execute(
+        { id: '1', name: 'exec_command', arguments: { command: 'git status' } },
+        ctx('/tmp'),
+      )
+      expect(result.isError).toBeFalsy()
+    })
   })
 
   describe('blocked commands', () => {
@@ -91,6 +127,42 @@ describe('TerminalHandler', () => {
       expect(result.isError).toBe(true)
       expect(result.content).toContain('not allowed')
     })
+
+    it('blocked rm -rf returns isError', async () => {
+      const result = await handler.execute(
+        {
+          id: '1',
+          name: 'exec_command',
+          arguments: { command: 'rm -rf /tmp' },
+        },
+        ctx('/tmp'),
+      )
+      expect(result.isError).toBe(true)
+    })
+
+    it('blocked dd returns isError', async () => {
+      const result = await handler.execute(
+        {
+          id: '1',
+          name: 'exec_command',
+          arguments: { command: 'dd if=/dev/zero of=/dev/sda' },
+        },
+        ctx('/tmp'),
+      )
+      expect(result.isError).toBe(true)
+    })
+
+    it('blocked parent traversal returns isError', async () => {
+      const result = await handler.execute(
+        {
+          id: '1',
+          name: 'exec_command',
+          arguments: { command: '../../etc/passwd' },
+        },
+        ctx('/tmp'),
+      )
+      expect(result.isError).toBe(true)
+    })
   })
 
   describe('shell injection', () => {
@@ -105,6 +177,54 @@ describe('TerminalHandler', () => {
       )
       expect(result.isError).toBe(true)
       expect(result.content).toContain('Potential injection detected')
+    })
+
+    it('allows && control flow on whitelisted commands', async () => {
+      mockExecFile.mockImplementation(
+        (
+          _file: string,
+          _args: string[],
+          _opts: unknown,
+          cb: ExecFileCallback,
+        ) => {
+          cb(null, 'hello\n', '')
+        },
+      )
+      const result = await handler.execute(
+        {
+          id: '1',
+          name: 'exec_command',
+          arguments: { command: 'echo hello && echo world' },
+        },
+        ctx('/tmp'),
+      )
+      // && is allowed for safe whitelisted commands (no actual shell execution)
+      expect(result.isError).toBeFalsy()
+    })
+
+    it('allows || fallback on whitelisted commands', async () => {
+      mockExecFile.mockImplementation(
+        (
+          _file: string,
+          _args: string[],
+          _opts: unknown,
+          cb: ExecFileCallback,
+        ) => {
+          cb(null, 'result\n', '')
+        },
+      )
+      const result = await handler.execute(
+        {
+          id: '1',
+          name: 'exec_command',
+          arguments: {
+            command: 'git diff HEAD origin/main --stat || echo "No remote"',
+          },
+        },
+        ctx('/tmp'),
+      )
+      // || is allowed for safe whitelisted commands (no actual shell execution)
+      expect(result.isError).toBeFalsy()
     })
 
     it('allows pipe in whitelisted commands (execFile has no shell)', async () => {
@@ -128,19 +248,6 @@ describe('TerminalHandler', () => {
       )
       // Pipe is passed as literal arg to echo (no shell), so it's allowed for whitelisted commands
       expect(result.isError).toBeFalsy()
-    })
-
-    it('blocks double pipe || injection', async () => {
-      const result = await handler.execute(
-        {
-          id: '1',
-          name: 'exec_command',
-          arguments: { command: 'echo hello || cat /etc/passwd' },
-        },
-        ctx('/tmp'),
-      )
-      expect(result.isError).toBe(true)
-      expect(result.content).toContain('Potential injection detected')
     })
 
     it('allows find with glob and pipe (e.g. find -name "*.ts" | head)', async () => {
@@ -211,6 +318,42 @@ describe('TerminalHandler', () => {
       )
       expect(result.isError).toBe(true)
       expect(result.content).toContain('Potential injection detected')
+    })
+
+    it('intercepts ${} variable expansion injection', async () => {
+      const result = await handler.execute(
+        {
+          id: '1',
+          name: 'exec_command',
+          arguments: { command: 'echo ${PATH}' },
+        },
+        ctx('/tmp'),
+      )
+      expect(result.isError).toBe(true)
+      expect(result.content).toContain('Potential injection detected')
+    })
+
+    it('allows $ in non-injection context (e.g. dollar sign)', async () => {
+      mockExecFile.mockImplementation(
+        (
+          _file: string,
+          _args: string[],
+          _opts: unknown,
+          cb: ExecFileCallback,
+        ) => {
+          cb(null, '5\n', '')
+        },
+      )
+      const result = await handler.execute(
+        {
+          id: '1',
+          name: 'exec_command',
+          arguments: { command: 'echo $5' },
+        },
+        ctx('/tmp'),
+      )
+      // Plain $N (positional param) is not an injection vector
+      expect(result.isError).toBeFalsy()
     })
   })
 

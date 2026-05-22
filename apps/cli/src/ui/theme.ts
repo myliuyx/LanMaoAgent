@@ -3,6 +3,7 @@ import os from 'node:os'
 import path, { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
+import { execSync } from 'node:child_process'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -13,15 +14,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 //   Left  half + Right half = full block (horizontally)
 // ─────────────────────────────────────────────
 
-// Full blocks — dark → light shade
-const FULL    = '█'   // solid black
-const SHADE3  = '▓'   // dark shade
-const SHADE2  = '▒'   // medium shade
-const SHADE1  = '░'   // light shade
-
-// Half blocks (upper/lower) — combine vertically to form full blocks
-const UPPER   = '▀'   // upper half
-const LOWER   = '▄'   // lower half
+// Full blocks — solid black
+const FULL    = '█'
 
 // Side halves — combine horizontally
 const HALF_L  = '▌'   // left half
@@ -30,14 +24,8 @@ const HALF_R  = '▐'   // right half
 // "White" quarter blocks for empty/background areas
 const WBR     = '▘'   // bottom-right (white)
 const WBL     = '▝'   // bottom-left (white)
-const WTR     = '▖'   // top-right (white)
-const WTL     = '▗'   // top-left (white)
-
-// Mixed quarter blocks for diagonal transitions
-const WBRD  = '▙'   // bottom half white
-const WTLD  = '▚'   // top-left white, rest dark
-const WBRT  = '▛'   // right half white
-const WBLC  = '▜'   // left half filled
+const WBRT    = '▛'   // right half white
+const WBLC    = '▜'   // left half filled
 
 function getVersion(): string {
   // Try package.json from the cli dist dir (runs as ESM)
@@ -55,8 +43,7 @@ function getVersion(): string {
 
   // Fallback: git describe
   try {
-    const cp = require('child_process')
-    const tag = cp.execSync("git describe --tags --always 2>/dev/null", {
+    const tag = execSync("git describe --tags --always 2>/dev/null", {
       cwd: path.join(__dirname, '../../..'),
       encoding: 'utf-8',
     }).trim()

@@ -1,12 +1,14 @@
 import { realpathSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type {
+  Logger,
   ToolHandler,
   ToolDefinition,
   ToolCall,
   ToolResult,
   ToolExecutionContext,
 } from '@agent-platform/shared-types'
+import { consoleLogger } from '@agent-platform/shared-types'
 
 /** Safely extract error message from unknown exception value */
 function safeErrorMessage(e: unknown): string {
@@ -85,6 +87,11 @@ export interface ToolRegistryInterface {
 export class ToolRegistry implements ToolRegistryInterface {
   private handlers = new Map<string, ToolHandler>()
   private toolToHandler = new Map<string, ToolHandler>()
+  private logger: Logger
+
+  constructor(logger?: Logger) {
+    this.logger = logger ?? consoleLogger
+  }
 
   register(handler: ToolHandler): void {
     this.handlers.set(handler.id, handler)

@@ -1,17 +1,50 @@
 import { execFile } from 'node:child_process'
 import type {
+  Logger,
   ToolHandler,
   ToolDefinition,
   ToolCall,
   ToolResult,
   ToolExecutionContext,
 } from '@agent-platform/shared-types'
+import { consoleLogger } from '@agent-platform/shared-types'
 import { checkShellInjection } from './shellSecurity.js'
+
+/**
+ * Check command arguments for dangerous patterns that could lead to
+ * arbitrary command execution or unintended file modification.
+ */
+function checkCommandArgs(name: string, args: string[]): { blocked: true; reason: string } | null {
+  // find -exec / -ok can execute arbitrary commands
+  if (name === 'find') {
+    const execIndex = args.indexOf('-exec')
+    if (execIndex !== -1) {
+      return { blocked: true, reason: "'find' with '-exec' is not allowed" }
+    }
+    const okIndex = args.indexOf('-ok')
+    if (okIndex !== -1) {
+      return { blocked: true, reason: "'find' with '-ok' is not allowed" }
+    }
+  }
+
+  // sed -i performs in-place editing which can modify sensitive files
+  if (name === 'sed') {
+    for (const arg of args) {
+      if (arg === '-i' || arg.startsWith('-i')) {
+        return { blocked: true, reason: "'sed' with '-i' (in-place edit) is not allowed" }
+      }
+    }
+  }
+
+  return null
+}
 
 const DEFAULT_WHITELIST = new Set([
   'cat', 'grep', 'ls', 'echo', 'git', 'find', 'head', 'tail', 'wc',
   'sed', 'mkdir', 'cp', 'mv', 'rm', 'touch', 'chmod', 'which',
   'node', 'npx', 'tsc', 'pnpm', 'npm',
+  // Common safe utilities
+  'pwd', 'date', 'uname', 'whoami', 'tee', 'diff', 'sort', 'uniq',
 ])
 
 // Full command patterns that are explicitly allowed (for commands with specific arguments)
@@ -19,6 +52,9 @@ const ALLOWED_COMMAND_PATTERNS = new Set([
   'pnpm install',
   'tsc --build',
   'npm run build',
+  'git diff HEAD origin/main --stat',
+  'git status',
+  'git log',
 ])
 
 function parseCommand(cmd: string): { name: string; args: string[] } {
@@ -66,9 +102,11 @@ function parseCommand(cmd: string): { name: string; args: string[] } {
 export class TerminalHandler implements ToolHandler {
   readonly id = 'terminal'
   private whitelist: Set<string>
+  private logger: Logger
 
-  constructor(whitelist?: string[]) {
+  constructor(whitelist?: string[], logger?: Logger) {
     this.whitelist = whitelist ? new Set(whitelist) : DEFAULT_WHITELIST
+    this.logger = logger ?? consoleLogger
   }
 
   getTools(): ToolDefinition[] {
@@ -125,6 +163,16 @@ export class TerminalHandler implements ToolHandler {
       return { content: danger.reason, isError: true, retryable: false }
     }
 
+    // Check command arguments for dangerous patterns
+    const argCheck = checkCommandArgs(name, cmdArgs)
+    if (argCheck) {
+      return {
+        content: argCheck.reason,
+        isError: true,
+        retryable: false,
+      }
+    }
+
     try {
       const output = await new Promise<string>((resolve, reject) => {
         execFile(
@@ -169,8 +217,7 @@ export class TerminalHandler implements ToolHandler {
         errorMessage = `Unknown error: ${JSON.stringify(e)}`
       }
 
-      // eslint-disable-next-line no-console
-      console.error(`[TerminalHandler] Command execution failed:`, command, errorMessage)
+      this.logger.error('Command execution failed', { command, error: errorMessage })
       return { content: errorMessage, isError: true }
     }
   }

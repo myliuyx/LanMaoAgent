@@ -1,11 +1,13 @@
 import type {
   ChatMessage,
   ChatResponse,
+  Logger,
   TokenUsage,
   ToolDefinition,
   ToolCall,
   LlmConfig,
 } from '@agent-platform/shared-types'
+import { consoleLogger } from '@agent-platform/shared-types'
 
 export interface LLMAdapter {
   complete(
@@ -20,6 +22,11 @@ interface ClaudeAdapterOptions {
   model?: string
   maxTokens?: number
   temperature?: number
+  logger?: Logger
+}
+
+function getDefaultLogger(): Logger {
+  return consoleLogger
 }
 
 function isAbortError(e: unknown): boolean {
@@ -38,6 +45,7 @@ export class ClaudeAdapter implements LLMAdapter {
   private model: string
   private maxTokens: number
   private temperature: number
+  private logger: Logger
 
   constructor(
     config: LlmConfig,
@@ -56,6 +64,7 @@ export class ClaudeAdapter implements LLMAdapter {
     this.model = options.model ?? 'claude-sonnet-4-20250514'
     this.maxTokens = options.maxTokens ?? 8192
     this.temperature = options.temperature ?? 0.2
+    this.logger = options.logger ?? getDefaultLogger()
   }
 
   async complete(
@@ -83,6 +92,7 @@ export class ClaudeAdapter implements LLMAdapter {
 
       if (isRetryable && attempt < maxRetries) {
         const delay = Math.min(1000 * 2 ** attempt, 5000)
+        this.logger.warn('API error, will retry', { status: e instanceof Error ? e.message : 'unknown', attempt })
         await sleep(delay)
         return this.completeWithRetry(messages, tools, attempt + 1)
       }
