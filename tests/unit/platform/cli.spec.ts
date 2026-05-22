@@ -141,6 +141,7 @@ describe('CLI Entry', () => {
     )
     const rlPromptMock = vi.fn()
     const rlCloseMock = vi.fn()
+    const stdoutWriteMock = vi.fn()
 
     runMock.mockResolvedValue({
       status: 'completed',
@@ -156,7 +157,7 @@ describe('CLI Entry', () => {
         env: { ANTHROPIC_API_KEY: 'test-key' },
         exit: exitMock,
         on: vi.fn(),
-        stdout: { write: vi.fn(), isTTY: true },
+        stdout: { write: stdoutWriteMock, isTTY: true },
         stdin: { on: vi.fn(), setRawMode: vi.fn() },
         argv: ['node', 'test'],
       } as unknown as NodeJS.Process,
@@ -179,8 +180,10 @@ describe('CLI Entry', () => {
 
     await lineHandler('my task')
 
-    expect(runMock).toHaveBeenCalledWith('my task', expect.any(AbortSignal), expect.any(Function), expect.any(Function), expect.any(Function))
-    expect(logMock).toHaveBeenCalledWith('task result output')
+    expect(runMock).toHaveBeenCalledWith('my task', expect.any(AbortSignal), expect.any(Function), expect.any(Function), expect.any(Function), expect.any(Function))
+    expect(stdoutWriteMock).toHaveBeenCalledWith(
+      expect.stringContaining('task result output'),
+    )
     expect(rlPromptMock).toHaveBeenCalled()
   })
 
@@ -194,6 +197,7 @@ describe('CLI Entry', () => {
       },
     )
     const rlPromptMock = vi.fn()
+    const stdoutWriteMock = vi.fn()
 
     runMock.mockResolvedValue({
       status: 'failed',
@@ -209,7 +213,7 @@ describe('CLI Entry', () => {
         env: { ANTHROPIC_API_KEY: 'test-key' },
         exit: exitMock,
         on: vi.fn(),
-        stdout: { write: vi.fn(), isTTY: true },
+        stdout: { write: stdoutWriteMock, isTTY: true },
         stdin: { on: vi.fn(), setRawMode: vi.fn() },
         argv: ['node', 'test'],
       } as unknown as NodeJS.Process,
@@ -230,8 +234,8 @@ describe('CLI Entry', () => {
 
     await lineHandler('some task')
 
-    expect(errorMock).toHaveBeenCalledWith(
-      expect.stringContaining('LLM temporarily unavailable'),
+    expect(stdoutWriteMock).toHaveBeenCalledWith(
+      expect.stringContaining('temporarily unavailable'),
     )
     expect(rlPromptMock).toHaveBeenCalled()
   })

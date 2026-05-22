@@ -15,6 +15,7 @@ import {
 import { theme } from './ui/theme.js'
 import { Spinner } from './ui/spinner.js'
 import { ToolView } from './ui/tool-view.js'
+import { OutputManager } from './ui/output-manager.js'
 import { render } from './ui/renderer.js'
 import { renderBanner } from './ui/theme.js'
 
@@ -206,7 +207,8 @@ export function runCli(
 
   const platform = new PlatformCtor(config)
 
-  const toolView = new ToolView()
+  const om = new OutputManager(proc.stdout, proc.stderr)
+  const toolView = new ToolView(om)
   const spinner = new Spinner()
 
   const promptText = theme.prompt('> ') + (config.cli?.prompt ?? 'Ask me anything: ')
@@ -224,15 +226,15 @@ export function runCli(
     proc.stdin.on('keypress', (_str: string, key: { name?: string }) => {
       if (key?.name === 'escape' && pendingQueue.length > 0) {
         pendingQueue = []
-        cons.log('\n' + theme.cancel('[排队已取消]'))
+        om.writeLine(theme.cancel('[排队已取消]'))
         rl.prompt()
       }
     })
   }
 
   // Banner on startup
-  cons.log(renderBanner())
-  cons.log(theme.separator('─'.repeat(65)))
+  om.writeContent(renderBanner())
+  om.writeLine(theme.separator('─'.repeat(om.terminalWidth)))
 
   rl.prompt()
 
@@ -262,8 +264,12 @@ export function runCli(
         (call, res, agentId) => {
           toolView.onFinish(call, res, agentId)
         },
+        (call, attempt, maxAttempts, error, agentId) => {
+          toolView.onRetry(call, attempt, maxAttempts, agentId)
+        },
       )
 
+      om.clearToolLine()
       spinner.stop()
 
       if (result.status === 'aborted') {
@@ -273,18 +279,19 @@ export function runCli(
       if (streamedAny) {
         proc.stdout.write('\n')
       } else if (result.output) {
-        cons.log(render(result.output))
+        om.writeContent(render(result.output))
       } else {
         const msg =
           result.status === 'failed'
             ? theme.error(`[LLM temporarily unavailable: ${result.error}] Retry by re-entering your request.`)
             : theme.error(`Error: ${result.error ?? `[${result.status}] No error message provided`}`)
-        cons.error(msg)
+        om.writeLine(msg)
       }
     } catch (e) {
       spinner.stop()
+      om.clearToolLine()
       if ((e as Error).name === 'AbortError') return
-      cons.error(theme.error(`Platform error: ${(e as Error).message}`))
+      om.writeLine(theme.error(`Platform error: ${(e as Error).message}`))
     } finally {
       running = false
       if (pendingQueue.length > 0) {
@@ -305,7 +312,7 @@ export function runCli(
 
     if (running) {
       pendingQueue.push(sanitizedInput)
-      cons.log(theme.queue(`⏳ 任务已排队 (${pendingQueue.length} 个待处理). 按 ESC 取消排队`))
+      om.writeLine(theme.queue(`⏳ 任务已排队 (${pendingQueue.length} 个待处理). 按 ESC 取消排队`))
       rl.prompt()
       return
     }
