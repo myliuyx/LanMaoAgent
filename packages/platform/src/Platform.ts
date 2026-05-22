@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type {
+  Logger,
   PlatformConfig,
   Agent,
   AgentResult,
@@ -8,7 +9,7 @@ import type {
   ToolHandler,
   ToolResult,
 } from '@agent-platform/shared-types'
-import { DEFAULT_CONFIG } from '@agent-platform/shared-types'
+import { DEFAULT_CONFIG, consoleLogger } from '@agent-platform/shared-types'
 import { ClaudeAdapter, OpenAIAdapter } from '@agent-platform/llm-adapter'
 import type { LLMAdapter } from '@agent-platform/llm-adapter'
 import { ToolRegistry, runAgentLoop } from '@agent-platform/tool-core'
@@ -35,25 +36,27 @@ export class Platform {
   private agentsCache = new Map<string, Agent>()
   private handlerMap = new Map<string, ToolHandler>()
   private sessions = new Map<string, Session>()
+  private logger: Logger
 
-  constructor(config: PlatformConfig) {
+  constructor(config: PlatformConfig, logger?: Logger) {
     this.config = { ...DEFAULT_CONFIG, ...config, llm: config.llm }
+    this.logger = logger ?? consoleLogger
 
     const provider = this.config.llm.provider ?? 'anthropic'
     if (provider === 'openai') {
-      this.llm = new OpenAIAdapter(this.config.llm)
+      this.llm = new OpenAIAdapter(this.config.llm, { logger: this.logger })
     } else {
       if (!this.config.llm.apiKey) {
         throw new Error('llm.apiKey required for anthropic provider (set ANTHROPIC_API_KEY env var or config file)')
       }
-      this.llm = new ClaudeAdapter(this.config.llm)
+      this.llm = new ClaudeAdapter(this.config.llm, { logger: this.logger })
     }
-    this.registry = new ToolRegistry()
+    this.registry = new ToolRegistry(this.logger)
 
-    const fsHandler = new FilesystemHandler(this.config.security?.allowedPaths)
+    const fsHandler = new FilesystemHandler(this.config.security?.allowedPaths, this.logger)
     const gitHandler = new GitHandler()
     const termWhitelist = this.config.security?.terminalWhitelist ?? undefined
-    const termHandler = new TerminalHandler(termWhitelist)
+    const termHandler = new TerminalHandler(termWhitelist, this.logger)
 
     for (const h of [fsHandler, gitHandler, termHandler]) {
       this.registry.register(h)
@@ -167,14 +170,18 @@ export class Platform {
         onToolFinish,
       })
 
-      // Persist updated messages back to the session for next run.
+      // Persist updated messages and STM back to the session for next run.
       if (result.status !== 'aborted') {
-        ;(session as typeof session & { messages: typeof messages }).messages = messages
+        session.messages = result.messages ?? []
+        if (result.memory) {
+          session.stm = result.memory
+        }
       }
 
       return result
     } catch (e) {
       const msg = e instanceof Error ? (e.message || e.toString()) : typeof e === 'string' ? e : JSON.stringify(e)
+      this.logger.error('Platform run failed', { error: msg })
       return {
         status: 'failed',
         agentId: 'orchestrator',

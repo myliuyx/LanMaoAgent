@@ -32,11 +32,45 @@ export interface AgentLoopConfig {
 
 export interface AgentLoopResult extends AgentResult {
   messages: ChatMessage[]
+  memory?: ShortTermMemory
+}
+
+/** Rough token count estimate from character length. */
+function estimateTokens(text: string): number {
+  return new TextEncoder().encode(text).length / 3.5
+}
+
+/** Estimate total tokens that will be sent to the LLM this iteration (system + all messages). */
+function estimateLLMTokens(
+  systemPrompt: string,
+  msgs: ChatMessage[],
+): number {
+  let total = estimateTokens(systemPrompt)
+  for (const m of msgs) {
+    if (m.content) total += estimateTokens(m.content)
+    if (m.toolCalls) {
+      for (const tc of m.toolCalls) {
+        total += estimateTokens(JSON.stringify(tc))
+      }
+    }
+    if (m.toolResults) {
+      for (const tr of m.toolResults) {
+        total += estimateTokens(tr.content || '')
+      }
+    }
+  }
+  return total
 }
 
 export async function runAgentLoop(
   config: AgentLoopConfig,
 ): Promise<AgentLoopResult> {
+  const maxIterations = config.maxIterations ?? 20
+  let messages = [...config.messages]
+  let cumulativeTokens = 0
+  let consecutiveCompactFailures = 0
+  const maxConsecutiveCompactFailures = 3
+
   // Check delegation depth limit
   if ((config.depth ?? 0) >= (config.maxDepth ?? 5)) {
     return {
@@ -44,21 +78,13 @@ export async function runAgentLoop(
       agentId: config.agent.id,
       error: 'Max delegation depth exceeded',
       messages: [...config.messages],
+      memory: config.memory,
     }
   }
 
-  const maxIterations = config.maxIterations ?? 20
-  let messages = [...config.messages]
-  let totalTokens = 0
-  let consecutiveCompactFailures = 0
-
-  const contextWindow = config.contextWindow ?? config.agent.contextWindow ?? 200000
-  const compressionRatio = config.compressionRatio ?? 0.7
-  const budget = Math.floor(contextWindow * compressionRatio)
-
   for (let iteration = 0; iteration < maxIterations; iteration++) {
     if (config.signal?.aborted) {
-      return { status: 'aborted', agentId: config.agent.id, messages }
+      return { status: 'aborted', agentId: config.agent.id, messages, memory: config.memory }
     }
 
     const systemPrompt = config.agent.systemPrompt
@@ -84,8 +110,12 @@ export async function runAgentLoop(
         agentId: config.agent.id,
         error: `LLM API call failed: ${msg}`,
         messages,
+        memory: config.memory,
       }
     }
+
+    // Track cumulative LLM usage for backward-compatible budget triggering.
+    cumulativeTokens += response.usage.totalTokens
 
     const toolCalls = response.message.toolCalls as ToolCall[] | undefined
 
@@ -95,6 +125,7 @@ export async function runAgentLoop(
         output: response.message.content,
         agentId: config.agent.id,
         messages,
+        memory: config.memory,
       }
     }
 
@@ -141,48 +172,53 @@ export async function runAgentLoop(
         config.memory.add(messages[i])
       }
 
-      totalTokens += response.usage.totalTokens
+      const budget = Math.floor(
+        (config.contextWindow ?? config.agent.contextWindow ?? 200000) *
+          (config.compressionRatio ?? 0.7),
+      )
 
-      if (totalTokens > budget * 2 && consecutiveCompactFailures >= 3) {
-        return {
-          status: 'failed',
-          agentId: config.agent.id,
-          error: 'Token budget exceeded hard limit',
-          messages,
-        }
-      }
+      // Trigger compact if EITHER:
+      // 1. Cumulative LLM usage exceeds budget (backward-compatible with original behavior)
+      // 2. Current messages array exceeds budget by a large margin (prevents runaway growth)
+      const llmTokenEstimate = estimateLLMTokens(systemPrompt, messages)
+      const needsCompact = cumulativeTokens > budget || llmTokenEstimate > budget * 3
 
-      if (totalTokens > budget) {
+      if (needsCompact) {
         const freed = config.memory.compact()
-        if (freed > 0) {
-          totalTokens = Math.max(0, totalTokens - freed)
-          consecutiveCompactFailures = 0
-
-          // 将 STM 压缩后的消息同步回 local messages，并重建 STM 使两者保持一致。
-          const stmContext = config.memory.getContext()
-          const keepCount = toolCalls.length + 1
-          const recent = messages.splice(-keepCount)
-          messages = [...stmContext, ...recent]
-
-          // Rebuild STM from the unified array so future adds stay in sync.
-          config.memory = new ShortTermMemory(0, 50)
-          for (const m of messages) {
-            config.memory.add(m)
-          }
-        } else {
+        if (freed <= 0) {
           consecutiveCompactFailures++
-          if (consecutiveCompactFailures >= 3) {
+          if (consecutiveCompactFailures >= maxConsecutiveCompactFailures) {
             return {
               status: 'failed',
               agentId: config.agent.id,
               error: 'Token budget exceeded hard limit',
               messages,
+              memory: config.memory,
             }
           }
+        } else {
+          consecutiveCompactFailures = 0
+
+          // Rebuild STM from the unified array so future adds stay in sync.
+          const stmContext = config.memory.getContext()
+          const keepCount = (toolCalls?.length ?? 0) + 1
+          const recent = messages.splice(-keepCount)
+          messages = [...stmContext, ...recent]
+
+          // Reset cumulative counter after successful compact to prevent drift.
+          cumulativeTokens = llmTokenEstimate
+
+          config.memory = new ShortTermMemory(0, 50)
+          for (const m of messages) {
+            config.memory.add(m)
+          }
         }
+      } else {
+        // Under budget — reset failure counter.
+        consecutiveCompactFailures = 0
       }
     }
   }
 
-  return { status: 'max_iterations_reached', agentId: config.agent.id, error: 'Max iterations reached', messages }
+  return { status: 'max_iterations_reached', agentId: config.agent.id, error: 'Max iterations reached', messages, memory: config.memory }
 }
