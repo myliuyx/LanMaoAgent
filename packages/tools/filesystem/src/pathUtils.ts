@@ -2,7 +2,7 @@ import { existsSync, realpathSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 
 // ── Constants ────────────────────────────────────────────────
-export const MAX_STRING_ARG_LENGTH = 4096
+export const MAX_STRING_ARG_LENGTH = 64 * 1024 // 64KB max per write_file call — Claude sonnet can output at most ~8K tokens (~20-40KB text), so this covers any single LLM call. For larger files, use append mode.
 export const GREP_MAX_RESULTS = 200
 export const OUTPUT_TRUNCATE_THRESHOLD = 10 * 1024
 export const EXEC_TIMEOUT_MS = 30_000
@@ -41,18 +41,9 @@ export function isInAllowedPath(realTarget: string, allowedPaths: string[]): boo
 }
 
 /**
- * Check that every ancestor directory up to root is within allowed paths.
- * Walks from target's parent up to filesystem root, resolving symlinks at each step.
+ * Check that the resolved parent directory is within allowed paths.
  */
 export function validateAncestors(targetPath: string, allowedPaths: string[]): boolean {
-  let current = dirname(safeResolve(resolve(targetPath)))
-  const root = resolve('/')
-
-  while (current !== root) {
-    if (!isInAllowedPath(current, allowedPaths)) return false
-    const parent = dirname(current)
-    if (parent === current) break // reached filesystem root
-    current = parent
-  }
-  return true
+  const current = dirname(safeResolve(resolve(targetPath)))
+  return isInAllowedPath(current, allowedPaths)
 }
