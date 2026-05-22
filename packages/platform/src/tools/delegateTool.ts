@@ -115,16 +115,17 @@ export class DelegateToAgentHandler implements ToolHandler {
 
     if (result.status !== 'completed') {
       const reason = result.error || `agent ended with status '${result.status}'`
-      return { content: JSON.stringify({ agentId: args.agentId, error: reason }), isError: true }
+      return { content: `[${args.agentId}] Error: ${reason}`, isError: true, metadata: { agentId: args.agentId } }
     }
 
     if (!result.output) {
-      return { content: JSON.stringify({ agentId: args.agentId, error: 'no output from sub-agent' }), isError: true }
+      return { content: `[${args.agentId}] No output from sub-agent`, isError: true, metadata: { agentId: args.agentId } }
     }
 
     return {
-      content: JSON.stringify({ agentId: args.agentId, output: result.output }),
+      content: result.output,
       isError: false,
+      metadata: { agentId: args.agentId },
     }
   }
 }

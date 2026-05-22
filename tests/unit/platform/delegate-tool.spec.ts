@@ -91,11 +91,8 @@ describe('DelegateToAgentHandler', () => {
     expect(loopArgs.llm).toBe(llm)
 
     expect(result.isError).toBeFalsy()
-    const parsed = JSON.parse(result.content)
-    expect(parsed).toEqual({
-      agentId: 'coding-agent',
-      output: 'refactored the code',
-    })
+    expect(result.content).toBe('refactored the code')
+    expect(result.metadata).toEqual({ agentId: 'coding-agent' })
   })
 
   it('returns isError when sub-agent is aborted', async () => {
