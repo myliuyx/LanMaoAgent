@@ -124,6 +124,7 @@ export class Platform {
     onChunk?: (text: string) => void,
     onToolStart?: (call: ToolCall, agentId: string) => void,
     onToolFinish?: (call: ToolCall, result: ToolResult, agentId: string) => void,
+    onToolRetry?: (call: ToolCall, attempt: number, maxAttempts: number, error: string, agentId: string) => void,
   ): Promise<AgentResult> {
     try {
       if (signal?.aborted) {
@@ -151,6 +152,7 @@ export class Platform {
           this.config.security?.allowedPaths ?? [session.projectRoot],
         onToolStart,
         onToolFinish,
+        onToolRetry,
       }
 
       const result = await runAgentLoop({
@@ -168,6 +170,7 @@ export class Platform {
         onChunk,
         onToolStart,
         onToolFinish,
+        onToolRetry,
       })
 
       // Persist updated messages and STM back to the session for next run.
