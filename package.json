@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc --build && node build.mjs",
     "test": "vitest run",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "format": "prettier --check packages/ tests/ apps/"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
