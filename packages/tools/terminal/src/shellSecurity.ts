@@ -1,6 +1,13 @@
-/** Truly dangerous shell metacharacters that enable command injection.
- * These are rejected regardless of the command being run. */
-const DANGEROUS_METACHARACTERS = /[;`]|\$\(|\$\{|!`|&&|\|\||>>/
+/**
+ * Dangerous shell metacharacters blocked regardless of command.
+ *
+ * 安全模型说明:
+ * - execFile() 不经过 shell，所以 &&, ||, >>, | 等 shell 元字符只是普通参数，无注入风险
+ * - 主要防线是 whitelist（仅允许信任的命令），其次是此正则检测
+ * - 此正则只拦截真正危险的注入：; ` $() ${} — 这些即使在 execFile 的 argv 中
+ *   也可能通过某些命令的内部处理（如 sh -c、eval）被利用
+ */
+const DANGEROUS_METACHARACTERS = /[;`]|\$\(|\${.*}/
 
 /** Dangerous patterns that should always be blocked (e.g. rm -rf). */
 const ALWAYS_DANGEROUS_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
