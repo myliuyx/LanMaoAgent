@@ -67,7 +67,6 @@ export async function runAgentLoop(
 ): Promise<AgentLoopResult> {
   const maxIterations = config.maxIterations ?? 20
   let messages = [...config.messages]
-  let cumulativeTokens = 0
 
   // Check delegation depth limit
   if ((config.depth ?? 0) >= (config.maxDepth ?? 5)) {
@@ -111,9 +110,6 @@ export async function runAgentLoop(
         memory: config.memory,
       }
     }
-
-    // Track cumulative LLM usage for backward-compatible budget triggering.
-    cumulativeTokens += response.usage.totalTokens
 
     const toolCalls = response.message.toolCalls as ToolCall[] | undefined
 
@@ -175,11 +171,9 @@ export async function runAgentLoop(
           (config.compressionRatio ?? 0.7),
       )
 
-      // Trigger compact if EITHER:
-      // 1. Cumulative LLM usage exceeds budget (backward-compatible with original behavior)
-      // 2. Current messages array exceeds budget by a large margin (prevents runaway growth)
+      // Trigger compact when current context exceeds budget.
       const llmTokenEstimate = estimateLLMTokens(systemPrompt, messages)
-      const needsCompact = cumulativeTokens > budget || llmTokenEstimate > budget * 3
+      const needsCompact = llmTokenEstimate > budget
 
       if (needsCompact) {
         const freed = config.memory.compact()
@@ -190,9 +184,6 @@ export async function runAgentLoop(
           const keepCount = (toolCalls?.length ?? 0) + 1
           const recent = messages.splice(-keepCount)
           messages = [...stmContext, ...recent]
-
-          // Reset cumulative counter after successful compact to prevent drift.
-          cumulativeTokens = llmTokenEstimate
 
           config.memory = new ShortTermMemory(0, 50)
           for (const m of messages) {

@@ -193,14 +193,14 @@ describe('runAgentLoop', () => {
       finishReason: 'tool_calls',
     }
 
-    it('compact triggers when totalTokens exceeds budget', async () => {
-      // budget = 100 * 0.5 = 50; each call uses 80 tokens
-      // after 1st call: 80 > 50 → compact triggers
+    it('compact triggers when context size exceeds budget', async () => {
+      // budget = 100 * 0.5 = 50; 30 messages of 'padding' ≈ 60 tokens > 50
       const stm = new ShortTermMemory()
       for (let i = 0; i < 60; i++) {
         stm.add({ role: 'user', content: 'padding' })
       }
       const compactSpy = vi.spyOn(stm, 'compact')
+      const largeMessages = Array.from({ length: 30 }, () => msg('user', 'padding'))
 
       const llm = mockLLM([
         toolResponse,
@@ -212,7 +212,7 @@ describe('runAgentLoop', () => {
       ])
       await runAgentLoop({
         agent,
-        messages: [msg('user', 'Do something')],
+        messages: largeMessages,
         llm,
         registry: mockRegistry(['result']),
         ctx: { sessionId: 's1', agentId: 'a1', cwd: '/tmp' },
@@ -224,36 +224,30 @@ describe('runAgentLoop', () => {
       expect(compactSpy).toHaveBeenCalledTimes(1)
     })
 
-    it('compact returns 0 for 3 consecutive calls → break', async () => {
+    it('compact returns 0 is not a failure', async () => {
       const stm = new ShortTermMemory()
-      // Fill STM with few messages so compact returns 0 (below threshold)
-      for (let i = 0; i < 10; i++) {
-        stm.add({ role: 'user', content: 'x' })
-      }
       const compactSpy = vi.spyOn(stm, 'compact')
 
-      // Return tool_calls every time (except it breaks due to budget)
-      const manyToolCalls = Array(10).fill({
-        ...toolResponse,
-        usage: { promptTokens: 50, completionTokens: 30, totalTokens: 80 },
-      })
-      const llm = mockLLM(manyToolCalls)
+      // budget = 50; 30 padding messages ≈ 60 tokens → triggers compact
+      // But STM is empty (0 ≤ threshold 50) → compact returns 0
+      const largeMessages = Array.from({ length: 30 }, () => msg('user', 'padding'))
+      const oneToolCall = [toolResponse]
+      const llm = mockLLM(oneToolCall)
 
       const result = await runAgentLoop({
         agent,
-        messages: [msg('user', 'Do it')],
+        messages: largeMessages,
         llm,
         registry: mockRegistry(['result']),
         ctx: { sessionId: 's1', agentId: 'a1', cwd: '/tmp' },
         memory: stm,
-        contextWindow: 200,
-        compressionRatio: 1.0, // budget = 200
+        contextWindow: 100,
+        compressionRatio: 0.5,
         maxIterations: 10,
       })
 
-      // compact() returns 0 when messages.length <= threshold (nothing to compact).
-      // This is NOT a failure — loop continues until max iterations.
-      expect(result.status).toBe('max_iterations_reached')
+      // compact() returns 0 when messages.length <= threshold — not a failure
+      expect(result.status).toBe('completed')
       expect(compactSpy).toHaveBeenCalled()
     })
 
@@ -264,7 +258,14 @@ describe('runAgentLoop', () => {
         stm.add({ role: 'user', content: 'padding '.repeat(20) })
       }
 
-      const toolResponse: ChatResponse = {
+      // 初始消息足够大，使 llmTokenEstimate > budget (100)
+      const largeMessages = Array.from({ length: 30 }, () => msg('user', 'padding '.repeat(20)))
+      // 把 STM 也同步为大消息，确保 compact 能跑
+      for (const m of largeMessages) {
+        stm.add(m)
+      }
+
+      const toolResponseLocal: ChatResponse = {
         message: {
           role: 'assistant',
           content: 'thinking...',
@@ -275,7 +276,7 @@ describe('runAgentLoop', () => {
       }
 
       const llm = mockLLM([
-        toolResponse,
+        toolResponseLocal,
         {
           message: { role: 'assistant', content: 'done' },
           usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
@@ -283,10 +284,10 @@ describe('runAgentLoop', () => {
         },
       ])
 
-      // 预算 = 200 * 0.5 = 100，第一次迭代 150 > 100 → 触发 compact
+      // budget = 200 * 0.5 = 100，30 条大消息 ≈ 2400 tokens > 100 → 触发 compact
       await runAgentLoop({
         agent,
-        messages: [msg('user', 'Do it')],
+        messages: largeMessages,
         llm,
         registry: mockRegistry(['result']),
         ctx: { sessionId: 's1', agentId: 'a1', cwd: '/tmp' },
